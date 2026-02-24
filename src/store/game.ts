@@ -225,7 +225,14 @@ export const useGameStore = create<GameState>((set, get) => ({
     await fetch('/api/game/army', {
       method: 'POST',
       headers: headers(deviceId),
-      body: JSON.stringify({ action: 'create', name, settlementId, units: unitSelections }),
+      body: JSON.stringify({
+        action: 'create',
+        name,
+        settlementId,
+        unitSelections: Object.entries(unitSelections)
+          .filter(([, qty]) => qty > 0)
+          .map(([unitType, quantity]) => ({ unitType, quantity })),
+      }),
     })
 
     await get().fetchState()
