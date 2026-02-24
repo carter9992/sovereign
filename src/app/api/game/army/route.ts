@@ -197,9 +197,10 @@ async function handleMarch(
     )
   }
 
-  // Get destination tile
+  // Get destination tile (include settlements for protection check)
   const toTile = await prisma.mapTile.findUnique({
     where: { id: toTileId },
+    include: { settlements: { select: { protectedUntil: true } } },
   })
 
   if (!toTile) {
@@ -209,10 +210,50 @@ async function handleMarch(
     )
   }
 
+  // Protection check: reject marching to a protected player settlement
+  if (toTile.ownerId && toTile.ownerId !== player.id && toTile.hasSettlement) {
+    const settlement = toTile.settlements[0]
+    if (settlement?.protectedUntil && settlement.protectedUntil > new Date()) {
+      return NextResponse.json(
+        { error: 'This settlement is under protection and cannot be attacked' },
+        { status: 400 },
+      )
+    }
+  }
+
   // Calculate distance (Euclidean)
   const dx = toTile.x - army.fromTile.x
   const dy = toTile.y - army.fromTile.y
   const distance = Math.sqrt(dx * dx + dy * dy)
+
+  // Calculate provision cost for the march
+  let totalProvisionCost = 0
+  for (const unit of army.armyUnits) {
+    const stats = UNIT_STATS[unit.unitType as UnitType]
+    if (stats) {
+      totalProvisionCost += unit.quantity * stats.provisionPerTile * distance
+    }
+  }
+  totalProvisionCost = Math.ceil(totalProvisionCost)
+
+  // Check player has enough provisions
+  if (!player.playerResources) {
+    return NextResponse.json(
+      { error: 'No resources found' },
+      { status: 400 },
+    )
+  }
+
+  const playerRes = await prisma.playerResources.findUnique({
+    where: { playerId: player.id },
+  })
+
+  if (!playerRes || playerRes.provisions < totalProvisionCost) {
+    return NextResponse.json(
+      { error: `Not enough provisions. Need ${totalProvisionCost}, have ${Math.floor(playerRes?.provisions ?? 0)}` },
+      { status: 400 },
+    )
+  }
 
   // Slowest unit determines army speed
   let slowestSpeed = Infinity
@@ -234,21 +275,31 @@ async function handleMarch(
   const now = new Date()
   const arrivesAt = new Date(now.getTime() + travelTimeMs)
 
-  const updatedArmy = await prisma.army.update({
-    where: { id: armyId },
-    data: {
-      status: 'MARCHING',
-      toTileId,
-      departedAt: now,
-      arrivesAt,
-    },
-    include: { armyUnits: true },
+  // Deduct provisions and update army in a transaction
+  const updatedArmy = await prisma.$transaction(async (tx) => {
+    await tx.playerResources.update({
+      where: { playerId: player.id },
+      data: { provisions: { decrement: totalProvisionCost } },
+    })
+
+    return tx.army.update({
+      where: { id: armyId },
+      data: {
+        status: 'MARCHING',
+        toTileId,
+        departedAt: now,
+        arrivesAt,
+        provisions: totalProvisionCost,
+      },
+      include: { armyUnits: true },
+    })
   })
 
   return NextResponse.json({
     army: updatedArmy,
     travelTimeMinutes: Math.round(travelTimeMinutes * 10) / 10,
     distance: Math.round(distance * 10) / 10,
+    provisionCost: totalProvisionCost,
   })
 }
 

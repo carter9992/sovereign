@@ -1,0 +1,304 @@
+// SOVEREIGN - Medieval Strategy Game
+// Prisma Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// ---------------------------------------------------------------------------
+// Players & Seasons
+// ---------------------------------------------------------------------------
+
+model Player {
+  id             String   @id @default(uuid())
+  deviceId       String   @unique
+  name           String
+  createdAt      DateTime @default(now())
+  tutorialStep   Int      @default(0)
+  seasonId       String
+  startingRegion String
+
+  season          Season           @relation(fields: [seasonId], references: [id])
+  settlements     Settlement[]
+  armies          Army[]
+  researchStates  ResearchState[]
+  activeResearch  ActiveResearch?
+  playerResources PlayerResources?
+  gameEvents      GameEvent[]
+  tradeOrders     TradeOrder[]
+  agreementsAs1   Agreement[]      @relation("AgreementPlayer1")
+  agreementsAs2   Agreement[]      @relation("AgreementPlayer2")
+  ownedTiles      MapTile[]
+
+  @@index([seasonId])
+}
+
+model Season {
+  id        String   @id @default(uuid())
+  name      String
+  startedAt DateTime @default(now())
+  endsAt    DateTime
+  active    Boolean  @default(true)
+
+  players Player[]
+}
+
+// ---------------------------------------------------------------------------
+// Settlements & Buildings
+// ---------------------------------------------------------------------------
+
+model Settlement {
+  id        String   @id @default(uuid())
+  playerId  String
+  name      String
+  type      String   // CAPITAL | FRONTIER
+  tileId    String
+  createdAt      DateTime  @default(now())
+  protectedUntil DateTime?
+
+  player          Player           @relation(fields: [playerId], references: [id])
+  tile            MapTile          @relation(fields: [tileId], references: [id])
+  buildings       Building[]
+  defenses        Defense[]
+  unitQueues      UnitQueue[]
+  settlementUnits SettlementUnits[]
+
+  @@index([playerId])
+  @@index([tileId])
+}
+
+model Building {
+  id                String    @id @default(uuid())
+  settlementId      String
+  type              String    // FARM | MINE | OBSERVATORY | BARRACKS | STORAGE | CITADEL
+  level             Int       @default(0)
+  isBuilt           Boolean   @default(false)
+  upgradeStartedAt  DateTime?
+  upgradeFinishAt   DateTime?
+
+  settlement Settlement @relation(fields: [settlementId], references: [id])
+
+  @@unique([settlementId, type])
+  @@index([settlementId])
+}
+
+model Defense {
+  id                String    @id @default(uuid())
+  settlementId      String
+  type              String    // WALLS | GUARD_TOWER | WATCH_TOWER | BALLISTA
+  level             Int       @default(0)
+  upgradeStartedAt  DateTime?
+  upgradeFinishAt   DateTime?
+
+  settlement Settlement @relation(fields: [settlementId], references: [id])
+
+  @@unique([settlementId, type])
+  @@index([settlementId])
+}
+
+// ---------------------------------------------------------------------------
+// Research
+// ---------------------------------------------------------------------------
+
+model ResearchState {
+  id       String @id @default(uuid())
+  playerId String
+  track    String // BALLISTICS | DEFENSE_TRACK | STRATEGY | CROP_MASTERY | ANIMAL_HUSBANDRY | HOLY | NECROTIC
+  level    Int    @default(0)
+
+  player Player @relation(fields: [playerId], references: [id])
+
+  @@unique([playerId, track])
+  @@index([playerId])
+}
+
+model ActiveResearch {
+  id        String   @id @default(uuid())
+  playerId  String   @unique // only one active research per player
+  track     String   // BALLISTICS | DEFENSE_TRACK | STRATEGY | CROP_MASTERY | ANIMAL_HUSBANDRY | HOLY | NECROTIC
+  startedAt DateTime @default(now())
+  finishAt  DateTime
+
+  player Player @relation(fields: [playerId], references: [id])
+}
+
+// ---------------------------------------------------------------------------
+// Units & Armies
+// ---------------------------------------------------------------------------
+
+model UnitQueue {
+  id           String   @id @default(uuid())
+  settlementId String
+  unitType     String   // INFANTRY | ARCHER | HEAVY_INFANTRY | WARDEN | CARAVAN | SCOUT | CAVALRY
+  quantity     Int
+  startedAt    DateTime @default(now())
+  finishAt     DateTime
+
+  settlement Settlement @relation(fields: [settlementId], references: [id])
+
+  @@index([settlementId])
+}
+
+model Army {
+  id         String    @id @default(uuid())
+  playerId   String
+  name       String
+  status     String    // IDLE | MARCHING | FIGHTING | RETURNING | GARRISON
+  fromTileId String
+  toTileId   String?
+  departedAt DateTime?
+  arrivesAt  DateTime?
+  provisions Float     @default(0)
+
+  player    Player     @relation(fields: [playerId], references: [id])
+  fromTile  MapTile    @relation("ArmyFromTile", fields: [fromTileId], references: [id])
+  toTile    MapTile?   @relation("ArmyToTile", fields: [toTileId], references: [id])
+  armyUnits ArmyUnit[]
+
+  @@index([playerId])
+  @@index([fromTileId])
+  @@index([toTileId])
+}
+
+model ArmyUnit {
+  id       String @id @default(uuid())
+  armyId   String
+  unitType String // INFANTRY | ARCHER | HEAVY_INFANTRY | WARDEN | CARAVAN | SCOUT | CAVALRY
+  quantity Int
+
+  army Army @relation(fields: [armyId], references: [id])
+
+  @@index([armyId])
+}
+
+model SettlementUnits {
+  id           String @id @default(uuid())
+  settlementId String
+  unitType     String // INFANTRY | ARCHER | HEAVY_INFANTRY | WARDEN | CARAVAN | SCOUT | CAVALRY
+  quantity     Int    @default(0)
+
+  settlement Settlement @relation(fields: [settlementId], references: [id])
+
+  @@unique([settlementId, unitType])
+  @@index([settlementId])
+}
+
+// ---------------------------------------------------------------------------
+// Map
+// ---------------------------------------------------------------------------
+
+model MapTile {
+  id            String  @id @default(uuid())
+  x             Int
+  y             Int
+  region        String
+  terrain       String  // PLAINS | FOREST | MOUNTAINS | COAST | RIVER | OCEAN
+  ownerId       String?
+  npcFactionId  String?
+  hasSettlement  Boolean @default(false)
+  hasManaNode   Boolean @default(false)
+  isHideout     Boolean @default(false)
+
+  owner       Player?      @relation(fields: [ownerId], references: [id])
+  npcFaction  NPCFaction?  @relation(fields: [npcFactionId], references: [id])
+  settlements Settlement[]
+  armiesFrom  Army[]       @relation("ArmyFromTile")
+  armiesTo    Army[]       @relation("ArmyToTile")
+
+  @@unique([x, y])
+  @@index([ownerId])
+  @@index([npcFactionId])
+  @@index([region])
+}
+
+model NPCFaction {
+  id              String @id @default(uuid())
+  name            String
+  aggressionLevel Int
+  strength        Int
+  description     String
+
+  tiles      MapTile[]
+  agreements Agreement[] @relation("AgreementNPCFaction")
+}
+
+// ---------------------------------------------------------------------------
+// Trade & Diplomacy
+// ---------------------------------------------------------------------------
+
+model TradeOrder {
+  id              String    @id @default(uuid())
+  playerId        String
+  type            String    // CROWN_MARKET | DIRECT
+  resourceSend    String
+  amountSend      Float
+  resourceReceive String
+  amountReceive   Float
+  status          String    // PENDING | IN_TRANSIT | COMPLETED | INTERCEPTED
+  riskPercent     Float
+  departedAt      DateTime?
+  arrivesAt       DateTime?
+
+  player Player @relation(fields: [playerId], references: [id])
+
+  @@index([playerId])
+  @@index([status])
+}
+
+model Agreement {
+  id           String    @id @default(uuid())
+  player1Id    String
+  player2Id    String?
+  npcFactionId String?
+  type         String    // TRADE_AGREEMENT | NON_AGGRESSION
+  startedAt    DateTime  @default(now())
+  expiresAt    DateTime?
+
+  player1    Player      @relation("AgreementPlayer1", fields: [player1Id], references: [id])
+  player2    Player?     @relation("AgreementPlayer2", fields: [player2Id], references: [id])
+  npcFaction NPCFaction? @relation("AgreementNPCFaction", fields: [npcFactionId], references: [id])
+
+  @@index([player1Id])
+  @@index([player2Id])
+  @@index([npcFactionId])
+}
+
+// ---------------------------------------------------------------------------
+// Events & Resources
+// ---------------------------------------------------------------------------
+
+model GameEvent {
+  id        String   @id @default(uuid())
+  playerId  String
+  type      String
+  message   String
+  data      String?  // JSON blob
+  createdAt DateTime @default(now())
+  read      Boolean  @default(false)
+
+  player Player @relation(fields: [playerId], references: [id])
+
+  @@index([playerId])
+  @@index([playerId, read])
+}
+
+model PlayerResources {
+  id            String   @id @default(uuid())
+  playerId      String   @unique
+  ore           Float    @default(500)
+  provisions    Float    @default(500)
+  gold          Float    @default(200)
+  mana          Float    @default(0)
+  oreCap        Float    @default(5000)
+  provisionsCap Float    @default(5000)
+  goldCap       Float    @default(5000)
+  manaCap       Float    @default(1000)
+  lastTickAt    DateTime @default(now())
+
+  player Player @relation(fields: [playerId], references: [id])
+}

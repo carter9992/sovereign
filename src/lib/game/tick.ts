@@ -8,8 +8,13 @@ import {
   TICK_INTERVAL_MS,
   MINE_LEVEL_MULTIPLIERS,
   CROP_MASTERY_MULTIPLIERS,
+  UNIT_STATS,
+  PVP_LOOT_PERCENT,
+  PROTECTION_DURATION_MS,
 } from './constants'
+import type { UnitType } from './constants'
 import { resolveCombat } from './combat'
+import type { ArmyForCombat } from './combat'
 import { generateNPCDefenders, generateScoutEstimate } from './npc'
 
 /** Minimum elapsed time (ms) before we process another tick for a player. */
@@ -261,27 +266,28 @@ export async function processPlayerTick(playerId: string): Promise<void> {
 
       // --- RETURNING armies: arrive home ---
       if (army.status === 'RETURNING') {
-        // Return scout units to garrison if this was a scout mission
-        if (army.name.startsWith('Scout Mission')) {
-          const fromSettlement = settlements.find(
-            (s) => s.tileId === army.fromTileId,
-          )
-          if (fromSettlement) {
-            const existingScout = fromSettlement.settlementUnits.find(
-              (u) => u.unitType === 'SCOUT',
+        // Return all surviving units to garrison
+        const fromSettlement = settlements.find(
+          (s) => s.tileId === army.fromTileId,
+        )
+        if (fromSettlement) {
+          for (const armyUnit of army.armyUnits) {
+            if (armyUnit.quantity <= 0) continue
+            const existing = fromSettlement.settlementUnits.find(
+              (u) => u.unitType === armyUnit.unitType,
             )
-            if (existingScout) {
+            if (existing) {
               await tx.settlementUnits.update({
-                where: { id: existingScout.id },
-                data: { quantity: existingScout.quantity + 1 },
+                where: { id: existing.id },
+                data: { quantity: existing.quantity + armyUnit.quantity },
               })
-              existingScout.quantity += 1
+              existing.quantity += armyUnit.quantity
             } else {
               const created = await tx.settlementUnits.create({
                 data: {
                   settlementId: fromSettlement.id,
-                  unitType: 'SCOUT',
-                  quantity: 1,
+                  unitType: armyUnit.unitType,
+                  quantity: armyUnit.quantity,
                 },
               })
               fromSettlement.settlementUnits.push(created)
@@ -307,11 +313,19 @@ export async function processPlayerTick(playerId: string): Promise<void> {
       // --- MARCHING armies: determine what happens on arrival ---
       const isScoutMission = army.name.startsWith('Scout Mission')
 
-      // Load destination tile with NPC faction data
+      // Load destination tile with NPC faction and settlement data
       const destTile = army.toTileId
         ? await tx.mapTile.findUnique({
             where: { id: army.toTileId },
-            include: { npcFaction: true },
+            include: {
+              npcFaction: true,
+              settlements: {
+                include: {
+                  defenses: true,
+                  settlementUnits: true,
+                },
+              },
+            },
           })
         : null
 
@@ -490,6 +504,309 @@ export async function processPlayerTick(playerId: string): Promise<void> {
             },
           })
         }
+      } else if (
+        destTile?.hasSettlement &&
+        destTile.ownerId &&
+        destTile.ownerId !== playerId
+      ) {
+        // ---- PvP Combat Arrival (enemy player settlement) ----
+        const targetSettlement = destTile.settlements[0]
+
+        // Check protection — if still active, bounce army back
+        if (
+          targetSettlement?.protectedUntil &&
+          targetSettlement.protectedUntil > now
+        ) {
+          const departedAt = army.departedAt!
+          const originalTripMs =
+            army.arrivesAt!.getTime() - departedAt.getTime()
+          const returnArrivesAt = new Date(now.getTime() + originalTripMs)
+
+          await tx.army.update({
+            where: { id: army.id },
+            data: {
+              status: 'RETURNING',
+              toTileId: army.fromTileId,
+              departedAt: now,
+              arrivesAt: returnArrivesAt,
+            },
+          })
+
+          await tx.gameEvent.create({
+            data: {
+              playerId,
+              type: 'ARMY_RETURNED',
+              message: `Army "${army.name}" could not attack — settlement at (${destTile.x}, ${destTile.y}) is under protection. Returning home.`,
+              data: JSON.stringify({
+                armyId: army.id,
+                toTileId: army.toTileId,
+                reason: 'PROTECTION_ACTIVE',
+              }),
+            },
+          })
+          continue
+        }
+
+        // Build defender army from garrison SettlementUnits + defenses + mana
+        const defenderUnits = targetSettlement
+          ? targetSettlement.settlementUnits
+              .filter((u) => u.quantity > 0)
+              .map((u) => ({ unitType: u.unitType, quantity: u.quantity }))
+          : []
+
+        const defenseStructures = targetSettlement
+          ? targetSettlement.defenses
+              .filter((d) => d.level > 0)
+              .map((d) => ({ type: d.type, level: d.level }))
+          : []
+
+        // Get defender's mana reserve
+        const defenderResources = await tx.playerResources.findUnique({
+          where: { playerId: destTile.ownerId },
+        })
+        const defenderMana = defenderResources?.mana ?? 0
+
+        const defenderArmy: ArmyForCombat = {
+          units: defenderUnits,
+          provisions: 0,
+          isDefending: true,
+          defenseStructures,
+          manaReserve: defenderMana,
+        }
+
+        const attackerArmy: ArmyForCombat = {
+          units: army.armyUnits.map((u) => ({
+            unitType: u.unitType,
+            quantity: u.quantity,
+          })),
+          provisions: army.provisions,
+          isDefending: false,
+        }
+
+        const result = resolveCombat(attackerArmy, defenderArmy)
+
+        // Calculate PvP loot from defender's actual resources
+        const carryCapacity = getCarryCapacityFromArmyUnits(army.armyUnits)
+        let loot = { ore: 0, provisions: 0, gold: 0 }
+
+        if (result.attackerWins && defenderResources && carryCapacity > 0) {
+          const rawOre = defenderResources.ore * PVP_LOOT_PERCENT
+          const rawProvisions =
+            defenderResources.provisions * PVP_LOOT_PERCENT
+          const rawGold = defenderResources.gold * PVP_LOOT_PERCENT
+          const totalRawLoot = rawOre + rawProvisions + rawGold
+
+          if (totalRawLoot > 0) {
+            if (totalRawLoot <= carryCapacity) {
+              loot = {
+                ore: Math.floor(rawOre),
+                provisions: Math.floor(rawProvisions),
+                gold: Math.floor(rawGold),
+              }
+            } else {
+              // Distribute proportionally within carry capacity
+              const ratio = carryCapacity / totalRawLoot
+              loot = {
+                ore: Math.floor(rawOre * ratio),
+                provisions: Math.floor(rawProvisions * ratio),
+                gold: Math.floor(rawGold * ratio),
+              }
+            }
+          }
+        }
+
+        if (result.attackerWins) {
+          // Apply attacker losses to army units
+          for (const loss of result.attackerLosses) {
+            const armyUnit = army.armyUnits.find(
+              (u) => u.unitType === loss.unitType,
+            )
+            if (armyUnit) {
+              const remaining = armyUnit.quantity - loss.lost
+              if (remaining <= 0) {
+                await tx.armyUnit.delete({ where: { id: armyUnit.id } })
+              } else {
+                await tx.armyUnit.update({
+                  where: { id: armyUnit.id },
+                  data: { quantity: remaining },
+                })
+              }
+            }
+          }
+
+          // Apply defender losses to SettlementUnits
+          if (targetSettlement) {
+            for (const loss of result.defenderLosses) {
+              const sUnit = targetSettlement.settlementUnits.find(
+                (u) => u.unitType === loss.unitType,
+              )
+              if (sUnit) {
+                const remaining = sUnit.quantity - loss.lost
+                await tx.settlementUnits.update({
+                  where: { id: sUnit.id },
+                  data: { quantity: Math.max(0, remaining) },
+                })
+              }
+            }
+
+            // Destroy ALL defense structures (level -> 0, cancel upgrades)
+            for (const defense of targetSettlement.defenses) {
+              if (defense.level > 0) {
+                await tx.defense.update({
+                  where: { id: defense.id },
+                  data: {
+                    level: 0,
+                    upgradeStartedAt: null,
+                    upgradeFinishAt: null,
+                  },
+                })
+              }
+            }
+
+            // Set protection on settlement
+            await tx.settlement.update({
+              where: { id: targetSettlement.id },
+              data: {
+                protectedUntil: new Date(
+                  now.getTime() + PROTECTION_DURATION_MS,
+                ),
+              },
+            })
+          }
+
+          // Transfer loot: decrement defender, increment attacker
+          if (loot.ore > 0 || loot.provisions > 0 || loot.gold > 0) {
+            await tx.playerResources.update({
+              where: { playerId: destTile.ownerId },
+              data: {
+                ore: { decrement: loot.ore },
+                provisions: { decrement: loot.provisions },
+                gold: { decrement: loot.gold },
+              },
+            })
+            await tx.playerResources.update({
+              where: { playerId },
+              data: {
+                ore: { increment: loot.ore },
+                provisions: { increment: loot.provisions },
+                gold: { increment: loot.gold },
+              },
+            })
+          }
+
+          // Set army RETURNING
+          const departedAt = army.departedAt!
+          const originalTripMs =
+            army.arrivesAt!.getTime() - departedAt.getTime()
+          const returnArrivesAt = new Date(now.getTime() + originalTripMs)
+
+          await tx.army.update({
+            where: { id: army.id },
+            data: {
+              status: 'RETURNING',
+              toTileId: army.fromTileId,
+              departedAt: now,
+              arrivesAt: returnArrivesAt,
+            },
+          })
+
+          // Create BATTLE_WON event for attacker
+          await tx.gameEvent.create({
+            data: {
+              playerId,
+              type: 'BATTLE_WON',
+              message: `Victory! Army "${army.name}" conquered the settlement at (${destTile.x}, ${destTile.y}).`,
+              data: JSON.stringify({
+                armyId: army.id,
+                toTileId: army.toTileId,
+                tileX: destTile.x,
+                tileY: destTile.y,
+                isPvP: true,
+                defenderPlayerId: destTile.ownerId,
+                attackerLosses: result.attackerLosses,
+                defenderLosses: result.defenderLosses,
+                loot,
+                defensesDestroyed: defenseStructures.length,
+              }),
+            },
+          })
+
+          // Create SETTLEMENT_ATTACKED event for defender
+          await tx.gameEvent.create({
+            data: {
+              playerId: destTile.ownerId,
+              type: 'SETTLEMENT_ATTACKED',
+              message: `Your settlement at (${destTile.x}, ${destTile.y}) was attacked and defeated!`,
+              data: JSON.stringify({
+                tileX: destTile.x,
+                tileY: destTile.y,
+                attackerPlayerId: playerId,
+                defenderLosses: result.defenderLosses,
+                lootStolen: loot,
+                defensesDestroyed: defenseStructures.length,
+                protectedUntil: new Date(
+                  now.getTime() + PROTECTION_DURATION_MS,
+                ).toISOString(),
+              }),
+            },
+          })
+        } else {
+          // Defender wins — attacker army destroyed
+          // Apply defender losses to SettlementUnits
+          if (targetSettlement) {
+            for (const loss of result.defenderLosses) {
+              const sUnit = targetSettlement.settlementUnits.find(
+                (u) => u.unitType === loss.unitType,
+              )
+              if (sUnit) {
+                const remaining = sUnit.quantity - loss.lost
+                await tx.settlementUnits.update({
+                  where: { id: sUnit.id },
+                  data: { quantity: Math.max(0, remaining) },
+                })
+              }
+            }
+          }
+
+          // Delete attacker army
+          await tx.armyUnit.deleteMany({ where: { armyId: army.id } })
+          await tx.army.delete({ where: { id: army.id } })
+
+          // Create BATTLE_LOST event for attacker
+          await tx.gameEvent.create({
+            data: {
+              playerId,
+              type: 'BATTLE_LOST',
+              message: `Defeat! Army "${army.name}" was destroyed attacking (${destTile.x}, ${destTile.y}).`,
+              data: JSON.stringify({
+                armyId: army.id,
+                toTileId: army.toTileId,
+                tileX: destTile.x,
+                tileY: destTile.y,
+                isPvP: true,
+                defenderPlayerId: destTile.ownerId,
+                attackerLosses: result.attackerLosses,
+                defenderLosses: result.defenderLosses,
+              }),
+            },
+          })
+
+          // Create SETTLEMENT_DEFENDED event for defender
+          await tx.gameEvent.create({
+            data: {
+              playerId: destTile.ownerId,
+              type: 'SETTLEMENT_DEFENDED',
+              message: `Your settlement at (${destTile.x}, ${destTile.y}) successfully repelled an attack!`,
+              data: JSON.stringify({
+                tileX: destTile.x,
+                tileY: destTile.y,
+                attackerPlayerId: playerId,
+                defenderLosses: result.defenderLosses,
+                attackerDestroyed: true,
+              }),
+            },
+          })
+        }
       } else {
         // ---- Peaceful Arrival (empty/own tile) ----
         await tx.army.update({
@@ -526,6 +843,22 @@ export async function processPlayerTick(playerId: string): Promise<void> {
       },
     })
   })
+}
+
+/**
+ * Calculate total carry capacity from army units (for PvP loot).
+ */
+function getCarryCapacityFromArmyUnits(
+  armyUnits: { unitType: string; quantity: number }[],
+): number {
+  let capacity = 0
+  for (const u of armyUnits) {
+    const stats = UNIT_STATS[u.unitType as UnitType]
+    if (stats && stats.carryCapacity > 0) {
+      capacity += stats.carryCapacity * u.quantity
+    }
+  }
+  return capacity
 }
 
 /**

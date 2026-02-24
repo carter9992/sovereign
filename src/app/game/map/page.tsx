@@ -25,7 +25,7 @@ const TERRAIN_LABELS: Record<string, string> = {
   OCEAN: 'Ocean',
 }
 
-const INTEL_EVENT_TYPES = ['SCOUT_REPORT', 'SCOUT_LOST', 'BATTLE_WON', 'BATTLE_LOST']
+const INTEL_EVENT_TYPES = ['SCOUT_REPORT', 'SCOUT_LOST', 'BATTLE_WON', 'BATTLE_LOST', 'SETTLEMENT_ATTACKED', 'SETTLEMENT_DEFENDED']
 
 // ---------------------------------------------------------------------------
 // Page
@@ -90,6 +90,8 @@ export default function MapPage() {
   const primarySettlement = settlements[0]
 
   const isNPCTile = !!selectedTile?.npcFactionId
+  const isEnemyPlayerTile = selectedTile?.ownerId && selectedTile.ownerId !== player?.id && selectedTile.hasSettlement
+  const isProtected = isEnemyPlayerTile && selectedTile?.protectedUntil && new Date(selectedTile.protectedUntil) > new Date()
 
   // Intelligence reports from events
   const intelReports = events.filter((e: any) => INTEL_EVENT_TYPES.includes(e.type))
@@ -138,11 +140,13 @@ export default function MapPage() {
                 }
 
                 const isOwned = tile.ownerId === player?.id
+                const isEnemy = tile.ownerId && tile.ownerId !== player?.id
                 const isSelected = selectedTile?.id === tile.id
                 const hasSettlement = tile.hasSettlement
                 const isNPC = !!tile.npcFactionId
                 const isHideout = tile.isHideout
                 const hasMana = tile.hasManaNode
+                const tileProtected = tile.protectedUntil && new Date(tile.protectedUntil) > new Date()
                 const terrainColor = TERRAIN_COLORS[tile.terrain] ?? 'bg-gray-800'
 
                 return (
@@ -154,6 +158,8 @@ export default function MapPage() {
                         ? 'border-amber-400 ring-1 ring-amber-400/30'
                         : isOwned
                         ? 'border-blue-500/60'
+                        : isEnemy
+                        ? 'border-purple-500/60'
                         : isNPC
                         ? 'border-red-500/40'
                         : 'border-gray-700/40'
@@ -165,6 +171,11 @@ export default function MapPage() {
                     )}
                     {hasSettlement && !isOwned && (
                       <span className="text-[10px]">🏘️</span>
+                    )}
+
+                    {/* Protection shield indicator */}
+                    {tileProtected && hasSettlement && (
+                      <span className="text-[10px] absolute top-0 right-0.5">🛡️</span>
                     )}
 
                     {/* NPC/hideout indicator */}
@@ -212,6 +223,14 @@ export default function MapPage() {
           <div className="flex items-center gap-2">
             <span className="text-[10px]">✨</span>
             <span className="text-gray-400">Mana node</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px]">🛡️</span>
+            <span className="text-gray-400">Protected</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded border-2 border-purple-500/60 bg-gray-800" />
+            <span className="text-gray-400">Enemy player</span>
           </div>
           {Object.entries(TERRAIN_LABELS).map(([key, label]) => (
             <div key={key} className="flex items-center gap-2">
@@ -273,16 +292,29 @@ export default function MapPage() {
                 <span className="text-red-400">Yes</span>
               </div>
             )}
+            {isProtected && (
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400">Protection</span>
+                <span className="text-cyan-400">
+                  Until {new Date(selectedTile.protectedUntil).toLocaleTimeString()}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Actions */}
           {selectedTile.ownerId !== player?.id && selectedTile.terrain !== 'OCEAN' && (
             <div className="mt-3 space-y-2">
-              {/* March / Deploy army here */}
-              {idleArmies.length > 0 && (
+              {/* March / Deploy / Attack army here */}
+              {isProtected && (
+                <div className="bg-cyan-900/30 border border-cyan-700/40 rounded p-2 text-center">
+                  <span className="text-cyan-400 text-xs font-medium">Protected — cannot attack</span>
+                </div>
+              )}
+              {idleArmies.length > 0 && !isProtected && (
                 <div>
                   <label className="text-xs text-gray-400 block mb-1">
-                    {isNPCTile ? 'Deploy army to attack' : 'March army here'}
+                    {isEnemyPlayerTile ? 'Deploy army to attack settlement' : isNPCTile ? 'Deploy army to attack' : 'March army here'}
                   </label>
                   <div className="flex items-center gap-2">
                     <select
@@ -301,12 +333,14 @@ export default function MapPage() {
                       onClick={handleMarchToTile}
                       disabled={!marchArmyId}
                       className={`${
-                        isNPCTile
+                        isEnemyPlayerTile
+                          ? 'bg-purple-600 hover:bg-purple-500'
+                          : isNPCTile
                           ? 'bg-red-600 hover:bg-red-500'
                           : 'bg-amber-600 hover:bg-amber-500'
                       } disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium rounded px-3 py-1.5 transition-colors`}
                     >
-                      {isNPCTile ? 'Deploy (Attack)' : 'March'}
+                      {isEnemyPlayerTile ? 'Attack Settlement' : isNPCTile ? 'Deploy (Attack)' : 'March'}
                     </button>
                   </div>
                 </div>
@@ -340,12 +374,16 @@ export default function MapPage() {
                 SCOUT_LOST: 'text-red-400 border-red-800/40',
                 BATTLE_WON: 'text-green-400 border-green-800/40',
                 BATTLE_LOST: 'text-red-400 border-red-800/40',
+                SETTLEMENT_ATTACKED: 'text-red-400 border-red-800/40',
+                SETTLEMENT_DEFENDED: 'text-green-400 border-green-800/40',
               }
               const typeLabels: Record<string, string> = {
                 SCOUT_REPORT: 'Scout Report',
                 SCOUT_LOST: 'Scout Lost',
                 BATTLE_WON: 'Victory',
                 BATTLE_LOST: 'Defeat',
+                SETTLEMENT_ATTACKED: 'Settlement Attacked',
+                SETTLEMENT_DEFENDED: 'Settlement Defended',
               }
 
               return (
@@ -403,7 +441,9 @@ export default function MapPage() {
                       {event.type === 'BATTLE_WON' && (
                         <>
                           <p className="text-gray-300">
-                            Against: <span className="text-red-400">{data.factionName ?? 'Unknown'}</span>
+                            Against: <span className="text-red-400">
+                              {data.isPvP ? 'Enemy Player Settlement' : (data.factionName ?? 'Unknown')}
+                            </span>
                           </p>
                           {data.attackerLosses?.length > 0 && (
                             <div>
@@ -414,6 +454,11 @@ export default function MapPage() {
                                 </p>
                               ))}
                             </div>
+                          )}
+                          {data.isPvP && data.defensesDestroyed > 0 && (
+                            <p className="text-yellow-400">
+                              {data.defensesDestroyed} defense structure{data.defensesDestroyed > 1 ? 's' : ''} destroyed
+                            </p>
                           )}
                           {data.loot && (
                             <p className="text-green-300">
@@ -449,6 +494,56 @@ export default function MapPage() {
                       {/* Scout Lost - no extra details needed */}
                       {event.type === 'SCOUT_LOST' && (
                         <p className="text-red-300">Scout was intercepted by hostile forces.</p>
+                      )}
+
+                      {/* Settlement Attacked (defender view) */}
+                      {event.type === 'SETTLEMENT_ATTACKED' && (
+                        <>
+                          {data.defenderLosses?.length > 0 && (
+                            <div>
+                              <p className="text-gray-400 mb-1">Garrison losses:</p>
+                              {data.defenderLosses.map((l: any, i: number) => (
+                                <p key={i} className="text-red-300 pl-2">
+                                  {l.unitType}: -{l.lost}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                          {data.defensesDestroyed > 0 && (
+                            <p className="text-yellow-400">
+                              {data.defensesDestroyed} defense structure{data.defensesDestroyed > 1 ? 's' : ''} destroyed
+                            </p>
+                          )}
+                          {data.lootStolen && (
+                            <p className="text-red-300">
+                              Stolen: {data.lootStolen.ore > 0 ? `${data.lootStolen.ore} ore ` : ''}
+                              {data.lootStolen.provisions > 0 ? `${data.lootStolen.provisions} provisions ` : ''}
+                              {data.lootStolen.gold > 0 ? `${data.lootStolen.gold} gold` : ''}
+                            </p>
+                          )}
+                          {data.protectedUntil && (
+                            <p className="text-cyan-400">
+                              Protection active until {new Date(data.protectedUntil).toLocaleTimeString()}
+                            </p>
+                          )}
+                        </>
+                      )}
+
+                      {/* Settlement Defended (defender view — victory) */}
+                      {event.type === 'SETTLEMENT_DEFENDED' && (
+                        <>
+                          {data.defenderLosses?.length > 0 && (
+                            <div>
+                              <p className="text-gray-400 mb-1">Garrison losses:</p>
+                              {data.defenderLosses.map((l: any, i: number) => (
+                                <p key={i} className="text-red-300 pl-2">
+                                  {l.unitType}: -{l.lost}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                          <p className="text-green-400">Enemy army destroyed!</p>
+                        </>
                       )}
                     </div>
                   )}
