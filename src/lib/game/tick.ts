@@ -481,6 +481,7 @@ export async function processPlayerTick(playerId: string): Promise<void> {
                 attackerLosses: result.attackerLosses,
                 defenderLosses: result.defenderLosses,
                 loot: result.loot,
+                phases: result.phases,
               }),
             },
           })
@@ -502,6 +503,7 @@ export async function processPlayerTick(playerId: string): Promise<void> {
                 factionName: faction.name,
                 attackerLosses: result.attackerLosses,
                 defenderLosses: result.defenderLosses,
+                phases: result.phases,
               }),
             },
           })
@@ -729,6 +731,7 @@ export async function processPlayerTick(playerId: string): Promise<void> {
                 defenderLosses: result.defenderLosses,
                 loot,
                 defensesDestroyed: defenseStructures.length,
+                phases: result.phases,
               }),
             },
           })
@@ -789,6 +792,7 @@ export async function processPlayerTick(playerId: string): Promise<void> {
                 defenderPlayerId: destTile.ownerId,
                 attackerLosses: result.attackerLosses,
                 defenderLosses: result.defenderLosses,
+                phases: result.phases,
               }),
             },
           })

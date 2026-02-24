@@ -237,6 +237,13 @@ export const PVP_LOOT_PERCENT = 0.15;
 export const PROTECTION_DURATION_MS = 24 * 60 * 60 * 1000;
 
 // -----------------------------------------------------------------------------
+// Combat Structure Constants (used by phased combat)
+// -----------------------------------------------------------------------------
+
+export const WALL_HP_PER_LEVEL = 100
+export const GUARD_TOWER_DAMAGE_PER_LEVEL = 20
+
+// -----------------------------------------------------------------------------
 // 14. Combat Triangle
 //     Damage multiplier when attacker engages defender.
 //     Values > 1.0 = attacker has advantage.

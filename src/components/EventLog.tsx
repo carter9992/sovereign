@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useGameStore } from '@/store/game'
 
 interface GameEvent {
@@ -23,6 +24,18 @@ interface BattleData {
   isHideout?: boolean
   defenderDefenses?: { type: string; level: number }[]
   defensesDestroyed?: { type: string; level: number }[]
+  phases?: {
+    ranged: {
+      attackerCasualties: UnitLoss[]
+      defenderCasualties: UnitLoss[]
+      guardTowerDamage: number
+    }
+    melee: {
+      attackerCasualties: UnitLoss[]
+      defenderCasualties: UnitLoss[]
+      wallDamageAbsorbed: number
+    }
+  }
 }
 
 const EVENT_ICONS: Record<string, string> = {
@@ -67,8 +80,64 @@ function parseBattleData(data: string | null): BattleData | null {
   }
 }
 
+function formatCasualties(losses: UnitLoss[]): string {
+  return losses
+    .filter((l) => l.lost > 0)
+    .map((l) => `${l.lost} ${UNIT_LABELS[l.unitType] ?? l.unitType}`)
+    .join(', ')
+}
+
+function PhaseBreakdown({ phases }: { phases: NonNullable<BattleData['phases']> }) {
+  const { ranged, melee } = phases
+  const hasRangedAtk = ranged.attackerCasualties.some((l) => l.lost > 0)
+  const hasRangedDef = ranged.defenderCasualties.some((l) => l.lost > 0)
+  const hasMeleeAtk = melee.attackerCasualties.some((l) => l.lost > 0)
+  const hasMeleeDef = melee.defenderCasualties.some((l) => l.lost > 0)
+
+  return (
+    <div className="mt-1 space-y-1.5 text-[10px] border-t border-gray-700/50 pt-1.5">
+      <div>
+        <span className="text-blue-400 font-medium">Ranged Phase</span>
+        {ranged.guardTowerDamage > 0 && (
+          <span className="text-gray-500 ml-1">(guard tower: {ranged.guardTowerDamage} dmg)</span>
+        )}
+        <div className="pl-2 space-y-0.5 mt-0.5">
+          {hasRangedAtk ? (
+            <div><span className="text-red-400">Your losses: </span>{formatCasualties(ranged.attackerCasualties)}</div>
+          ) : (
+            <div className="text-gray-600">No losses from ranged fire</div>
+          )}
+          {hasRangedDef ? (
+            <div><span className="text-amber-400">Enemy losses: </span>{formatCasualties(ranged.defenderCasualties)}</div>
+          ) : (
+            <div className="text-gray-600">No enemy ranged casualties</div>
+          )}
+        </div>
+      </div>
+      <div>
+        <span className="text-orange-400 font-medium">Melee Phase</span>
+        {melee.wallDamageAbsorbed > 0 && (
+          <span className="text-gray-500 ml-1">(wall absorbed: {melee.wallDamageAbsorbed} dmg)</span>
+        )}
+        <div className="pl-2 space-y-0.5 mt-0.5">
+          {hasMeleeAtk ? (
+            <div><span className="text-red-400">Your losses: </span>{formatCasualties(melee.attackerCasualties)}</div>
+          ) : (
+            <div className="text-gray-600">No losses in melee</div>
+          )}
+          {hasMeleeDef ? (
+            <div><span className="text-amber-400">Enemy losses: </span>{formatCasualties(melee.defenderCasualties)}</div>
+          ) : (
+            <div className="text-gray-600">No enemy melee casualties</div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function BattleReport({ event }: { event: GameEvent }) {
-  if (event.type === 'BATTLE_LOST') return null
+  const [showPhases, setShowPhases] = useState(false)
 
   const battle = parseBattleData(event.data)
   if (!battle) return null
@@ -84,10 +153,7 @@ function BattleReport({ event }: { event: GameEvent }) {
       {hasLosses && (
         <div>
           <span className="text-red-400 font-medium">Casualties: </span>
-          {battle.attackerLosses!
-            .filter((l) => l.lost > 0)
-            .map((l) => `${l.lost} ${UNIT_LABELS[l.unitType] ?? l.unitType}`)
-            .join(', ')}
+          {formatCasualties(battle.attackerLosses!)}
         </div>
       )}
       {!hasLosses && (
@@ -99,10 +165,7 @@ function BattleReport({ event }: { event: GameEvent }) {
       {hasKills && (
         <div>
           <span className="text-amber-400 font-medium">Enemies killed: </span>
-          {battle.defenderLosses!
-            .filter((l) => l.lost > 0)
-            .map((l) => `${l.lost} ${UNIT_LABELS[l.unitType] ?? l.unitType}`)
-            .join(', ')}
+          {formatCasualties(battle.defenderLosses!)}
         </div>
       )}
 
@@ -135,6 +198,20 @@ function BattleReport({ event }: { event: GameEvent }) {
             .join(', ')}
         </div>
       )}
+
+      {battle.phases && (
+        <button
+          onClick={() => setShowPhases(!showPhases)}
+          className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-300 transition-colors mt-0.5"
+        >
+          <span className="text-xs leading-none">{showPhases ? '▾' : 'ℹ'}</span>
+          <span className="underline underline-offset-2">
+            {showPhases ? 'Hide' : 'Phase'} detail
+          </span>
+        </button>
+      )}
+
+      {battle.phases && showPhases && <PhaseBreakdown phases={battle.phases} />}
     </div>
   )
 }
@@ -166,7 +243,7 @@ export default function EventLog() {
             <span className="text-sm leading-none mt-0.5">{icon}</span>
             <div className="flex-1 min-w-0">
               <p className="leading-snug">{event.message}</p>
-              {event.type === 'BATTLE_WON' && <BattleReport event={event} />}
+              {(event.type === 'BATTLE_WON' || event.type === 'BATTLE_LOST') && <BattleReport event={event} />}
               <p className="text-gray-600 text-[10px] mt-0.5">{time}</p>
             </div>
             {!event.read && (
