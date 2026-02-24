@@ -476,6 +476,8 @@ export async function processPlayerTick(playerId: string): Promise<void> {
                 tileX: destTile.x,
                 tileY: destTile.y,
                 factionName: faction.name,
+                isHideout: destTile.isHideout,
+                defenderDefenses: npcDefenders.defenseStructures ?? [],
                 attackerLosses: result.attackerLosses,
                 defenderLosses: result.defenderLosses,
                 loot: result.loot,

@@ -20,6 +20,8 @@ interface BattleData {
   attackerLosses?: UnitLoss[]
   defenderLosses?: UnitLoss[]
   loot?: { ore: number; provisions: number; gold: number }
+  isHideout?: boolean
+  defenderDefenses?: { type: string; level: number }[]
   defensesDestroyed?: { type: string; level: number }[]
 }
 
@@ -104,6 +106,14 @@ function BattleReport({ event }: { event: GameEvent }) {
         </div>
       )}
 
+      {battle.defenderDefenses && battle.defenderDefenses.length > 0 && (
+        <div>
+          <span className="text-amber-400 font-medium">Defenses destroyed: </span>
+          {battle.defenderDefenses
+            .map((d) => `${d.type} (Lv${d.level})`)
+            .join(', ')}
+        </div>
+      )}
       {battle.defensesDestroyed && battle.defensesDestroyed.length > 0 && (
         <div>
           <span className="text-amber-400 font-medium">Defenses destroyed: </span>

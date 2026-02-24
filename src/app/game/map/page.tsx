@@ -443,14 +443,35 @@ export default function MapPage() {
                           <p className="text-gray-300">
                             Against: <span className="text-red-400">
                               {data.isPvP ? 'Enemy Player Settlement' : (data.factionName ?? 'Unknown')}
+                              {data.isHideout ? ' (Hideout)' : ''}
                             </span>
                           </p>
+                          {data.defenderLosses?.length > 0 && (
+                            <div>
+                              <p className="text-gray-400 mb-1">Enemies killed:</p>
+                              {data.defenderLosses.map((l: any, i: number) => (
+                                <p key={i} className="text-amber-300 pl-2">
+                                  {l.unitType}: {l.lost}
+                                </p>
+                              ))}
+                            </div>
+                          )}
                           {data.attackerLosses?.length > 0 && (
                             <div>
                               <p className="text-gray-400 mb-1">Your losses:</p>
                               {data.attackerLosses.map((l: any, i: number) => (
                                 <p key={i} className="text-red-300 pl-2">
                                   {l.unitType}: -{l.lost}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                          {data.defenderDefenses?.length > 0 && (
+                            <div>
+                              <p className="text-gray-400 mb-1">Defenses destroyed:</p>
+                              {data.defenderDefenses.map((d: any, i: number) => (
+                                <p key={i} className="text-yellow-400 pl-2">
+                                  {d.type} (Lv{d.level})
                                 </p>
                               ))}
                             </div>
