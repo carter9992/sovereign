@@ -5,6 +5,7 @@ import {
   BASE_ORE_PER_TICK,
   BASE_PROVISIONS_PER_TICK,
   BASE_GOLD_PER_TICK,
+  BASE_LUMBER_PER_TICK,
   TICK_INTERVAL_MS,
 } from '@/lib/game/constants'
 
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
 // Fast-forward all timers by N minutes
 // -----------------------------------------------------------------------
 async function handleFastForward(
-  player: { id: string; playerResources: { id: string; ore: number; provisions: number; gold: number; mana: number; oreCap: number; provisionsCap: number; goldCap: number; manaCap: number } | null },
+  player: { id: string; playerResources: { id: string; ore: number; provisions: number; gold: number; lumber: number; mana: number; oreCap: number; provisionsCap: number; goldCap: number; lumberCap: number; manaCap: number } | null },
   body: { minutes?: number },
 ) {
   const { minutes } = body
@@ -112,6 +113,7 @@ async function handleFastForward(
       const oreGain = BASE_ORE_PER_TICK * tickMultiplier
       const provisionsGain = BASE_PROVISIONS_PER_TICK * tickMultiplier
       const goldGain = BASE_GOLD_PER_TICK * tickMultiplier
+      const lumberGain = BASE_LUMBER_PER_TICK * tickMultiplier
 
       const res = player.playerResources
       await tx.playerResources.update({
@@ -120,6 +122,7 @@ async function handleFastForward(
           ore: Math.min(res.ore + oreGain, res.oreCap),
           provisions: Math.min(res.provisions + provisionsGain, res.provisionsCap),
           gold: Math.min(res.gold + goldGain, res.goldCap),
+          lumber: Math.min(res.lumber + lumberGain, res.lumberCap),
         },
       })
     }
@@ -148,10 +151,10 @@ async function handleFastForward(
 // Add resources directly
 // -----------------------------------------------------------------------
 async function handleAddResources(
-  player: { id: string; playerResources: { id: string; ore: number; provisions: number; gold: number; mana: number; oreCap: number; provisionsCap: number; goldCap: number; manaCap: number } | null },
-  body: { ore?: number; provisions?: number; gold?: number; mana?: number },
+  player: { id: string; playerResources: { id: string; ore: number; provisions: number; gold: number; lumber: number; mana: number; oreCap: number; provisionsCap: number; goldCap: number; lumberCap: number; manaCap: number } | null },
+  body: { ore?: number; provisions?: number; gold?: number; lumber?: number; mana?: number },
 ) {
-  const { ore, provisions, gold, mana } = body
+  const { ore, provisions, gold, lumber, mana } = body
 
   if (!player.playerResources) {
     return NextResponse.json(
@@ -171,6 +174,9 @@ async function handleAddResources(
   }
   if (gold && typeof gold === 'number') {
     updates.gold = Math.min(res.gold + gold, res.goldCap)
+  }
+  if (lumber && typeof lumber === 'number') {
+    updates.lumber = Math.min(res.lumber + lumber, res.lumberCap)
   }
   if (mana && typeof mana === 'number') {
     updates.mana = Math.min(res.mana + mana, res.manaCap)

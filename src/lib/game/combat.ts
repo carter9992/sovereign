@@ -26,7 +26,7 @@ export interface CombatResult {
   attackerWins: boolean
   attackerLosses: { unitType: string; lost: number }[]
   defenderLosses: { unitType: string; lost: number }[]
-  loot: { ore: number; provisions: number; gold: number }
+  loot: { ore: number; provisions: number; gold: number; lumber: number }
   phases: {
     ranged: {
       attackerCasualties: { unitType: string; lost: number }[]
@@ -394,16 +394,17 @@ export function resolveCombat(
   }
 
   // Loot calculation (20% of provisions, capped by caravan capacity)
-  let loot = { ore: 0, provisions: 0, gold: 0 }
+  let loot = { ore: 0, provisions: 0, gold: 0, lumber: 0 }
   if (attackerWins && hasCaravans(attacker.units)) {
     const lootPool = defender.provisions * 0.2
     const capacity = getCarryCapacity(attacker.units)
     const actualLoot = Math.min(lootPool, capacity)
 
     loot = {
-      ore: Math.floor(actualLoot * 0.4),
-      provisions: Math.floor(actualLoot * 0.4),
+      ore: Math.floor(actualLoot * 0.3),
+      provisions: Math.floor(actualLoot * 0.3),
       gold: Math.floor(actualLoot * 0.2),
+      lumber: Math.floor(actualLoot * 0.2),
     }
   }
 

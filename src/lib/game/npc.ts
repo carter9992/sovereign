@@ -12,7 +12,7 @@ export interface ScoutEstimate {
   factionName: string
   estimatedTroops: { unitType: string; quantity: number }[]
   hasDefenses: boolean
-  resourceEstimate: { ore: number; provisions: number; gold: number }
+  resourceEstimate: { ore: number; provisions: number; gold: number; lumber: number }
 }
 
 // -----------------------------------------------------------------------------
@@ -87,6 +87,7 @@ export function generateScoutEstimate(
       ore: Math.round(s * 100 * resFuzz()),
       provisions: Math.round(s * 150 * resFuzz()),
       gold: Math.round(s * 50 * resFuzz()),
+      lumber: Math.round(s * 80 * resFuzz()),
     },
   }
 }

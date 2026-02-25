@@ -8,10 +8,12 @@ interface Resources {
   ore: number
   provisions: number
   gold: number
+  lumber: number
   mana: number
   oreCap: number
   provisionsCap: number
   goldCap: number
+  lumberCap: number
   manaCap: number
 }
 
@@ -49,7 +51,7 @@ interface GameState {
     resourceReceive: string
   }) => Promise<void>
   debugFastForward: (minutes: number) => Promise<void>
-  debugAddResources: (resources: Partial<Record<'ore' | 'provisions' | 'gold' | 'mana', number>>) => Promise<void>
+  debugAddResources: (resources: Partial<Record<'ore' | 'provisions' | 'gold' | 'lumber' | 'mana', number>>) => Promise<void>
 }
 
 // ---------------------------------------------------------------------------

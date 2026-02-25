@@ -75,7 +75,7 @@ model Settlement {
 model Building {
   id                String    @id @default(uuid())
   settlementId      String
-  type              String    // FARM | MINE | OBSERVATORY | BARRACKS | STORAGE | CITADEL
+  type              String    // FARM | MINE | OBSERVATORY | BARRACKS | STORAGE | CITADEL | SAWMILL
   level             Int       @default(0)
   isBuilt           Boolean   @default(false)
   upgradeStartedAt  DateTime?
@@ -108,7 +108,7 @@ model Defense {
 model ResearchState {
   id       String @id @default(uuid())
   playerId String
-  track    String // BALLISTICS | DEFENSE_TRACK | STRATEGY | CROP_MASTERY | ANIMAL_HUSBANDRY | HOLY | NECROTIC
+  track    String // BALLISTICS | DEFENSE_TRACK | STRATEGY | CROP_MASTERY | ANIMAL_HUSBANDRY | FORESTRY | HOLY | NECROTIC
   level    Int    @default(0)
 
   player Player @relation(fields: [playerId], references: [id])
@@ -120,7 +120,7 @@ model ResearchState {
 model ActiveResearch {
   id        String   @id @default(uuid())
   playerId  String   @unique // only one active research per player
-  track     String   // BALLISTICS | DEFENSE_TRACK | STRATEGY | CROP_MASTERY | ANIMAL_HUSBANDRY | HOLY | NECROTIC
+  track     String   // BALLISTICS | DEFENSE_TRACK | STRATEGY | CROP_MASTERY | ANIMAL_HUSBANDRY | FORESTRY | HOLY | NECROTIC
   startedAt DateTime @default(now())
   finishAt  DateTime
 
@@ -290,13 +290,15 @@ model GameEvent {
 model PlayerResources {
   id            String   @id @default(uuid())
   playerId      String   @unique
-  ore           Float    @default(500)
-  provisions    Float    @default(500)
+  ore           Float    @default(400)
+  provisions    Float    @default(400)
   gold          Float    @default(200)
+  lumber        Float    @default(300)
   mana          Float    @default(0)
   oreCap        Float    @default(5000)
   provisionsCap Float    @default(5000)
   goldCap       Float    @default(5000)
+  lumberCap     Float    @default(5000)
   manaCap       Float    @default(1000)
   lastTickAt    DateTime @default(now())
 

@@ -4,10 +4,14 @@ import {
   BASE_ORE_PER_TICK,
   BASE_PROVISIONS_PER_TICK,
   BASE_GOLD_PER_TICK,
+  BASE_LUMBER_PER_TICK,
   BASE_MANA_PER_TICK,
   TICK_INTERVAL_MS,
   MINE_LEVEL_MULTIPLIERS,
   CROP_MASTERY_MULTIPLIERS,
+  SAWMILL_BASE_PER_TICK,
+  SAWMILL_LEVEL_MULTIPLIERS,
+  FORESTRY_MULTIPLIERS,
   UNIT_STATS,
   PVP_LOOT_PERCENT,
   PROTECTION_DURATION_MS,
@@ -111,6 +115,22 @@ export async function processPlayerTick(playerId: string): Promise<void> {
     const cropMultiplier =
       (CROP_MASTERY_MULTIPLIERS as Record<number, number>)[cropMasteryLevel] ?? 1
 
+    // Determine Sawmill state for lumber production (mirrors mine pattern).
+    const sawmill = allBuildings.find((b) => b.type === 'SAWMILL')
+    const sawmillIsUpgrading =
+      sawmill?.upgradeFinishAt != null && sawmill.upgradeFinishAt > now
+    const sawmillLevel = sawmill?.level ?? 0
+    const sawmillMultiplier =
+      (SAWMILL_LEVEL_MULTIPLIERS as Record<number, number>)[sawmillLevel] ?? 1
+
+    // Determine forestry research multiplier.
+    const forestryState = researchStates.find(
+      (r) => r.track === 'FORESTRY',
+    )
+    const forestryLevel = forestryState?.level ?? 0
+    const forestryMultiplier =
+      (FORESTRY_MULTIPLIERS as Record<number, number>)[forestryLevel] ?? 1
+
     // Determine mana eligibility: observatory must be built AND mana must
     // be "discovered" (player owns or is adjacent to a mana node tile, or
     // has researched HOLY/NECROTIC). We simplify here to: observatory is
@@ -127,6 +147,10 @@ export async function processPlayerTick(playerId: string): Promise<void> {
     const provisionsDelta =
       BASE_PROVISIONS_PER_TICK * cropMultiplier * tickMultiplier
     const goldDelta = BASE_GOLD_PER_TICK * tickMultiplier
+    const lumberDelta =
+      sawmill?.isBuilt && !sawmillIsUpgrading
+        ? SAWMILL_BASE_PER_TICK * sawmillMultiplier * forestryMultiplier * tickMultiplier
+        : BASE_LUMBER_PER_TICK * tickMultiplier
     const manaDelta = manaDiscovered
       ? BASE_MANA_PER_TICK * tickMultiplier
       : 0
@@ -138,6 +162,10 @@ export async function processPlayerTick(playerId: string): Promise<void> {
       resources.provisionsCap,
     )
     const newGold = Math.min(resources.gold + goldDelta, resources.goldCap)
+    const newLumber = Math.min(
+      resources.lumber + lumberDelta,
+      resources.lumberCap,
+    )
     const newMana = Math.min(resources.mana + manaDelta, resources.manaCap)
 
     // ------------------------------------------------------------------
@@ -359,7 +387,7 @@ export async function processPlayerTick(playerId: string): Promise<void> {
                 factionName: 'None',
                 estimatedTroops: [],
                 hasDefenses: false,
-                resourceEstimate: { ore: 0, provisions: 0, gold: 0 },
+                resourceEstimate: { ore: 0, provisions: 0, gold: 0, lumber: 0 },
               }
 
           await tx.gameEvent.create({
@@ -430,13 +458,14 @@ export async function processPlayerTick(playerId: string): Promise<void> {
           }
 
           // Grant loot to player resources
-          if (result.loot.ore > 0 || result.loot.provisions > 0 || result.loot.gold > 0) {
+          if (result.loot.ore > 0 || result.loot.provisions > 0 || result.loot.gold > 0 || result.loot.lumber > 0) {
             await tx.playerResources.update({
               where: { playerId },
               data: {
                 ore: { increment: result.loot.ore },
                 provisions: { increment: result.loot.provisions },
                 gold: { increment: result.loot.gold },
+                lumber: { increment: result.loot.lumber },
               },
             })
           }
@@ -591,14 +620,15 @@ export async function processPlayerTick(playerId: string): Promise<void> {
 
         // Calculate PvP loot from defender's actual resources
         const carryCapacity = getCarryCapacityFromArmyUnits(army.armyUnits)
-        let loot = { ore: 0, provisions: 0, gold: 0 }
+        let loot = { ore: 0, provisions: 0, gold: 0, lumber: 0 }
 
         if (result.attackerWins && defenderResources && carryCapacity > 0) {
           const rawOre = defenderResources.ore * PVP_LOOT_PERCENT
           const rawProvisions =
             defenderResources.provisions * PVP_LOOT_PERCENT
           const rawGold = defenderResources.gold * PVP_LOOT_PERCENT
-          const totalRawLoot = rawOre + rawProvisions + rawGold
+          const rawLumber = defenderResources.lumber * PVP_LOOT_PERCENT
+          const totalRawLoot = rawOre + rawProvisions + rawGold + rawLumber
 
           if (totalRawLoot > 0) {
             if (totalRawLoot <= carryCapacity) {
@@ -606,6 +636,7 @@ export async function processPlayerTick(playerId: string): Promise<void> {
                 ore: Math.floor(rawOre),
                 provisions: Math.floor(rawProvisions),
                 gold: Math.floor(rawGold),
+                lumber: Math.floor(rawLumber),
               }
             } else {
               // Distribute proportionally within carry capacity
@@ -614,6 +645,7 @@ export async function processPlayerTick(playerId: string): Promise<void> {
                 ore: Math.floor(rawOre * ratio),
                 provisions: Math.floor(rawProvisions * ratio),
                 gold: Math.floor(rawGold * ratio),
+                lumber: Math.floor(rawLumber * ratio),
               }
             }
           }
@@ -679,13 +711,14 @@ export async function processPlayerTick(playerId: string): Promise<void> {
           }
 
           // Transfer loot: decrement defender, increment attacker
-          if (loot.ore > 0 || loot.provisions > 0 || loot.gold > 0) {
+          if (loot.ore > 0 || loot.provisions > 0 || loot.gold > 0 || loot.lumber > 0) {
             await tx.playerResources.update({
               where: { playerId: destTile.ownerId },
               data: {
                 ore: { decrement: loot.ore },
                 provisions: { decrement: loot.provisions },
                 gold: { decrement: loot.gold },
+                lumber: { decrement: loot.lumber },
               },
             })
             await tx.playerResources.update({
@@ -694,6 +727,7 @@ export async function processPlayerTick(playerId: string): Promise<void> {
                 ore: { increment: loot.ore },
                 provisions: { increment: loot.provisions },
                 gold: { increment: loot.gold },
+                lumber: { increment: loot.lumber },
               },
             })
           }
@@ -844,6 +878,7 @@ export async function processPlayerTick(playerId: string): Promise<void> {
         ore: newOre,
         provisions: newProvisions,
         gold: newGold,
+        lumber: newLumber,
         mana: newMana,
         lastTickAt: now,
       },
