@@ -3,6 +3,7 @@ import { getPlayerFromRequest } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import {
   UNIT_TRAINING_COSTS,
+  BARRACKS_LEVEL_TRAINING_MULTIPLIERS,
   TUTORIAL_STEPS,
 } from '@/lib/game/constants'
 import type { UnitType } from '@/lib/game/constants'
@@ -152,9 +153,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Not enough gold' }, { status: 400 })
     }
 
-    // Training time = base time * quantity
+    // Training time = base time * quantity * barracks multiplier
     const now = new Date()
-    const trainingTimeSeconds = unitCost.timeSeconds * quantity
+    const barracksLevel = barracks.level ?? 1
+    const barracksMultiplier = (BARRACKS_LEVEL_TRAINING_MULTIPLIERS as Record<number, number>)[barracksLevel] ?? 1.0
+    const trainingTimeSeconds = Math.ceil(unitCost.timeSeconds * quantity * barracksMultiplier)
     const finishAt = new Date(now.getTime() + trainingTimeSeconds * 1000)
 
     // Deduct resources and create unit queue entry

@@ -8,11 +8,13 @@ import {
   CITADEL_UPGRADE_COSTS,
   STORAGE_UPGRADE_COSTS,
   SAWMILL_UPGRADE_COSTS,
+  BARRACKS_UPGRADE_COSTS,
+  FARM_UPGRADE_COSTS,
   TUTORIAL_STEPS,
 } from '@/lib/game/constants'
 
 type BuildingType = 'SAWMILL' | 'FARM' | 'MINE' | 'OBSERVATORY' | 'BARRACKS' | 'STORAGE'
-type UpgradeableType = 'MINE' | 'CITADEL' | 'STORAGE' | 'SAWMILL'
+type UpgradeableType = 'MINE' | 'CITADEL' | 'STORAGE' | 'SAWMILL' | 'BARRACKS' | 'FARM'
 
 export async function POST(request: Request) {
   try {
@@ -92,6 +94,10 @@ export async function POST(request: Request) {
         cost = (STORAGE_UPGRADE_COSTS as Record<number, typeof cost>)[nextLevel]
       } else if (buildingType === 'SAWMILL') {
         cost = (SAWMILL_UPGRADE_COSTS as Record<number, typeof cost>)[nextLevel]
+      } else if (buildingType === 'BARRACKS') {
+        cost = (BARRACKS_UPGRADE_COSTS as Record<number, typeof cost>)[nextLevel]
+      } else if (buildingType === 'FARM') {
+        cost = (FARM_UPGRADE_COSTS as Record<number, typeof cost>)[nextLevel]
       } else {
         return NextResponse.json(
           { error: `Building type ${buildingType} cannot be upgraded` },

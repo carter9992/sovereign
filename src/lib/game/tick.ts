@@ -12,6 +12,8 @@ import {
   SAWMILL_BASE_PER_TICK,
   SAWMILL_LEVEL_MULTIPLIERS,
   FORESTRY_MULTIPLIERS,
+  FARM_LEVEL_MULTIPLIERS,
+  UNIT_UPKEEP_PER_TICK,
   UNIT_STATS,
   PVP_LOOT_PERCENT,
   PROTECTION_DURATION_MS,
@@ -88,7 +90,7 @@ export async function processPlayerTick(playerId: string): Promise<void> {
     })
 
     const armies = await tx.army.findMany({
-      where: { playerId, status: { in: ['MARCHING', 'RETURNING'] } },
+      where: { playerId, status: { in: ['MARCHING', 'RETURNING', 'IDLE'] } },
       include: { armyUnits: true },
     })
 
@@ -131,6 +133,14 @@ export async function processPlayerTick(playerId: string): Promise<void> {
     const forestryMultiplier =
       (FORESTRY_MULTIPLIERS as Record<number, number>)[forestryLevel] ?? 1
 
+    // Determine farm state for provisions production.
+    const farm = allBuildings.find((b) => b.type === 'FARM')
+    const farmIsUpgrading =
+      farm?.upgradeFinishAt != null && farm.upgradeFinishAt > now
+    const farmLevel = farm?.level ?? 0
+    const farmMultiplier =
+      (FARM_LEVEL_MULTIPLIERS as Record<number, number>)[farmLevel] ?? 1
+
     // Determine mana eligibility: observatory must be built AND mana must
     // be "discovered" (player owns or is adjacent to a mana node tile, or
     // has researched HOLY/NECROTIC). We simplify here to: observatory is
@@ -144,8 +154,9 @@ export async function processPlayerTick(playerId: string): Promise<void> {
     const oreDelta = mineIsUpgrading
       ? 0
       : BASE_ORE_PER_TICK * mineMultiplier * tickMultiplier
-    const provisionsDelta =
-      BASE_PROVISIONS_PER_TICK * cropMultiplier * tickMultiplier
+    const provisionsProduction = farmIsUpgrading
+      ? 0
+      : BASE_PROVISIONS_PER_TICK * farmMultiplier * cropMultiplier * tickMultiplier
     const goldDelta = BASE_GOLD_PER_TICK * tickMultiplier
     const lumberDelta =
       sawmill?.isBuilt && !sawmillIsUpgrading
@@ -155,12 +166,29 @@ export async function processPlayerTick(playerId: string): Promise<void> {
       ? BASE_MANA_PER_TICK * tickMultiplier
       : 0
 
+    // Calculate unit upkeep from garrison + armies.
+    let totalUpkeep = 0
+    for (const settlement of settlements) {
+      for (const unit of settlement.settlementUnits) {
+        const upkeep = (UNIT_UPKEEP_PER_TICK as Record<string, number>)[unit.unitType] ?? 0
+        totalUpkeep += unit.quantity * upkeep
+      }
+    }
+    for (const army of armies) {
+      for (const unit of army.armyUnits) {
+        const upkeep = (UNIT_UPKEEP_PER_TICK as Record<string, number>)[unit.unitType] ?? 0
+        totalUpkeep += unit.quantity * upkeep
+      }
+    }
+    const upkeepDrain = totalUpkeep * tickMultiplier
+    const provisionsDelta = provisionsProduction - upkeepDrain
+
     // Apply deltas, capping at resource caps.
     const newOre = Math.min(resources.ore + oreDelta, resources.oreCap)
-    const newProvisions = Math.min(
+    const newProvisions = Math.max(0, Math.min(
       resources.provisions + provisionsDelta,
       resources.provisionsCap,
-    )
+    ))
     const newGold = Math.min(resources.gold + goldDelta, resources.goldCap)
     const newLumber = Math.min(
       resources.lumber + lumberDelta,

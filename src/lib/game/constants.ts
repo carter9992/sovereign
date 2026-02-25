@@ -61,13 +61,16 @@ export const MINE_LEVEL_MULTIPLIERS = {
   3: 1.4,
   4: 1.65,
   5: 2.0,
+  6: 2.4,
+  7: 2.85,
+  8: 3.4,
 } as const;
 
 // -----------------------------------------------------------------------------
 // 4b. Sawmill Constants
 // -----------------------------------------------------------------------------
 
-export const SAWMILL_BASE_PER_TICK = 6;
+export const SAWMILL_BASE_PER_TICK = 4;
 
 export const SAWMILL_LEVEL_MULTIPLIERS = {
   1: 1.0,
@@ -75,6 +78,9 @@ export const SAWMILL_LEVEL_MULTIPLIERS = {
   3: 1.6,
   4: 2.0,
   5: 2.5,
+  6: 3.0,
+  7: 3.6,
+  8: 4.3,
 } as const;
 
 export const SAWMILL_UPGRADE_COSTS = {
@@ -82,6 +88,48 @@ export const SAWMILL_UPGRADE_COSTS = {
   3: { lumber: 1000, ore: 500, timeSeconds: 20 * 60 } as ResourceCost,
   4: { lumber: 2500, ore: 1200, timeSeconds: 45 * 60 } as ResourceCost,
   5: { lumber: 5000, ore: 2500, timeSeconds: 90 * 60 } as ResourceCost,
+  6: { lumber: 10000, ore: 5000, timeSeconds: 180 * 60 } as ResourceCost,
+  7: { lumber: 18000, ore: 9000, timeSeconds: 300 * 60 } as ResourceCost,
+  8: { lumber: 30000, ore: 15000, timeSeconds: 360 * 60 } as ResourceCost,
+} as const;
+
+// -----------------------------------------------------------------------------
+// 4c. Barracks Upgrades (training speed)
+// -----------------------------------------------------------------------------
+
+export const BARRACKS_LEVEL_TRAINING_MULTIPLIERS = {
+  1: 1.0, 2: 0.85, 3: 0.70, 4: 0.55, 5: 0.40,
+} as const;
+
+export const BARRACKS_UPGRADE_COSTS = {
+  2: { ore: 300, lumber: 400, timeSeconds: 10 * 60 } as ResourceCost,
+  3: { ore: 800, lumber: 1000, timeSeconds: 25 * 60 } as ResourceCost,
+  4: { ore: 2000, lumber: 2500, timeSeconds: 60 * 60 } as ResourceCost,
+  5: { ore: 5000, lumber: 6000, timeSeconds: 120 * 60 } as ResourceCost,
+} as const;
+
+// -----------------------------------------------------------------------------
+// 4d. Farm Upgrades (provisions production)
+// -----------------------------------------------------------------------------
+
+export const FARM_LEVEL_MULTIPLIERS = {
+  1: 1.0, 2: 1.3, 3: 1.6, 4: 2.0, 5: 2.5,
+} as const;
+
+export const FARM_UPGRADE_COSTS = {
+  2: { lumber: 300, ore: 150, timeSeconds: 8 * 60 } as ResourceCost,
+  3: { lumber: 800, ore: 400, timeSeconds: 20 * 60 } as ResourceCost,
+  4: { lumber: 2000, ore: 1000, timeSeconds: 45 * 60 } as ResourceCost,
+  5: { lumber: 5000, ore: 2500, timeSeconds: 90 * 60 } as ResourceCost,
+} as const;
+
+// -----------------------------------------------------------------------------
+// 4e. Unit Upkeep (provisions per tick per unit)
+// -----------------------------------------------------------------------------
+
+export const UNIT_UPKEEP_PER_TICK = {
+  INFANTRY: 0.5, ARCHER: 0.5, HEAVY_INFANTRY: 0.8,
+  WARDEN: 0.3, CARAVAN: 1.0, SCOUT: 0.3, CAVALRY: 1.5,
 } as const;
 
 // -----------------------------------------------------------------------------
@@ -168,6 +216,9 @@ export const MINE_UPGRADE_COSTS = {
   3: { ore: 1000, lumber: 500, timeSeconds: 25 * 60 } as ResourceCost,
   4: { ore: 2500, lumber: 1200, timeSeconds: 60 * 60 } as ResourceCost,
   5: { ore: 5000, lumber: 2500, timeSeconds: 120 * 60 } as ResourceCost,
+  6: { ore: 10000, lumber: 5000, timeSeconds: 180 * 60 } as ResourceCost,
+  7: { ore: 18000, lumber: 9000, timeSeconds: 300 * 60 } as ResourceCost,
+  8: { ore: 30000, lumber: 15000, timeSeconds: 360 * 60 } as ResourceCost,
 } as const;
 
 // -----------------------------------------------------------------------------
@@ -212,49 +263,49 @@ export const UNIT_TRAINING_COSTS = {
     ore: 15,
     provisions: 10,
     gold: 0,
-    timeSeconds: 30,
+    timeSeconds: 75,
     requires: null,
   },
   ARCHER: {
     ore: 25,
     provisions: 12,
     gold: 0,
-    timeSeconds: 45,
+    timeSeconds: 112,
     requires: { BALLISTICS: 1 },
   },
   HEAVY_INFANTRY: {
     ore: 50,
     provisions: 20,
     gold: 0,
-    timeSeconds: 90,
+    timeSeconds: 225,
     requires: { totalWar: 3, mine: 2 },
   },
   WARDEN: {
     ore: 35,
     provisions: 25,
     gold: 0,
-    timeSeconds: 60,
+    timeSeconds: 150,
     requires: { DEFENSE_TRACK: 2 },
   },
   CARAVAN: {
     ore: 10,
     provisions: 40,
     gold: 0,
-    timeSeconds: 45,
+    timeSeconds: 112,
     requires: { ANIMAL_HUSBANDRY: 2 },
   },
   SCOUT: {
     ore: 15,
     provisions: 15,
     gold: 0,
-    timeSeconds: 60,
+    timeSeconds: 150,
     requires: { STRATEGY: 1 },
   },
   CAVALRY: {
     ore: 60,
     provisions: 35,
     gold: 15,
-    timeSeconds: 120,
+    timeSeconds: 300,
     requires: { totalWar: 5, ANIMAL_HUSBANDRY: 3 },
   },
 } as const;

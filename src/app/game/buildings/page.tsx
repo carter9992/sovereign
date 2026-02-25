@@ -9,6 +9,8 @@ import {
   CITADEL_UPGRADE_COSTS,
   STORAGE_UPGRADE_COSTS,
   SAWMILL_UPGRADE_COSTS,
+  BARRACKS_UPGRADE_COSTS,
+  FARM_UPGRADE_COSTS,
   TUTORIAL_STEPS,
 } from '@/lib/game/constants'
 
@@ -18,10 +20,10 @@ import {
 
 const BUILDING_DESCRIPTIONS: Record<string, string> = {
   SAWMILL: 'Produces lumber for construction. Output scales with Forestry research.',
-  FARM: 'Produces provisions. Output scales with Crop Mastery research.',
+  FARM: 'Produces provisions. Upgrade to increase output.',
   MINE: 'Produces ore. Upgrade to increase output. Production stops during upgrades.',
   OBSERVATORY: 'Survey the land. Required for Mana discovery.',
-  BARRACKS: 'Train military units.',
+  BARRACKS: 'Train military units. Upgrade to decrease training time.',
   STORAGE: 'Increases resource storage caps.',
   CITADEL: 'Your seat of power. Unlocks scouts, frontiers, and advanced features.',
 }
@@ -78,6 +80,8 @@ function getUpgradeCost(type: string, nextLevel: number) {
   if (type === 'CITADEL') return (CITADEL_UPGRADE_COSTS as any)[nextLevel]
   if (type === 'STORAGE') return (STORAGE_UPGRADE_COSTS as any)[nextLevel]
   if (type === 'SAWMILL') return (SAWMILL_UPGRADE_COSTS as any)[nextLevel]
+  if (type === 'BARRACKS') return (BARRACKS_UPGRADE_COSTS as any)[nextLevel]
+  if (type === 'FARM') return (FARM_UPGRADE_COSTS as any)[nextLevel]
   return null
 }
 
@@ -142,7 +146,7 @@ export default function BuildingsPage() {
             building.upgradeFinishAt &&
             new Date(building.upgradeFinishAt) > new Date()
           const isHighlighted = highlightedBuilding === type
-          const canUpgrade = type === 'MINE' || type === 'CITADEL' || type === 'STORAGE' || type === 'SAWMILL'
+          const canUpgrade = type === 'MINE' || type === 'CITADEL' || type === 'STORAGE' || type === 'SAWMILL' || type === 'BARRACKS' || type === 'FARM'
 
           const upgradeCost = canUpgrade && isBuilt ? getUpgradeCost(type, building.level + 1) : null
           const buildCost = !isBuilt ? BUILDING_BUILD_COSTS[type] : null

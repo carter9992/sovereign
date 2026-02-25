@@ -5,6 +5,7 @@ import { useGameStore } from '@/store/game'
 import {
   UNIT_TRAINING_COSTS,
   UNIT_STATS,
+  BARRACKS_LEVEL_TRAINING_MULTIPLIERS,
   type UnitType,
 } from '@/lib/game/constants'
 
@@ -140,6 +141,8 @@ export default function ArmyPage() {
   const barracks = (capital?.buildings ?? []).find(
     (b: any) => b.type === 'BARRACKS' && b.isBuilt
   )
+  const barracksLevel = barracks?.level ?? 1
+  const barracksMultiplier = (BARRACKS_LEVEL_TRAINING_MULTIPLIERS as Record<number, number>)[barracksLevel] ?? 1.0
   const garrison = capital?.settlementUnits ?? []
   const unitQueues = capital?.unitQueues ?? []
 
@@ -311,7 +314,7 @@ export default function ArmyPage() {
                         {cost.ore > 0 && <span>{cost.ore} ore</span>}
                         {cost.provisions > 0 && <span>{cost.provisions} prov</span>}
                         {cost.gold > 0 && <span>{cost.gold} gold</span>}
-                        <span>({formatTime(cost.timeSeconds)})</span>
+                        <span>({formatTime(Math.ceil(cost.timeSeconds * barracksMultiplier))})</span>
                       </div>
 
                       <div className="flex items-center gap-2">

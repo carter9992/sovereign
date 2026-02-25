@@ -234,7 +234,7 @@ async function handleMarch(
       totalProvisionCost += unit.quantity * stats.provisionPerTile * distance
     }
   }
-  totalProvisionCost = Math.ceil(totalProvisionCost)
+  totalProvisionCost = Math.ceil(totalProvisionCost * 2) // round trip
 
   // Check player has enough provisions
   if (!player.playerResources) {
