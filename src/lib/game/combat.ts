@@ -7,6 +7,7 @@ import {
   COMBAT_TRIANGLE,
   WALL_HP_PER_LEVEL,
   GUARD_TOWER_DAMAGE_PER_LEVEL,
+  CAVALRY_CHARGE_MULTIPLIER,
 } from './constants'
 
 // -----------------------------------------------------------------------------
@@ -128,7 +129,9 @@ function applyRangedProportional(
 }
 
 /**
- * Apply ranged damage in speed order — fastest attacker units die first.
+ * Apply ranged damage in speed order — slowest units die first.
+ * Slow-moving units are easier to hit with ranged fire and absorb arrows
+ * first. Fast cavalry ride through the volley and are targeted last.
  * Tracks a raw damage pool; the ARCHER combat triangle is applied per target
  * and the pool is consumed by the raw equivalent (damage / triangle).
  */
@@ -141,7 +144,7 @@ function applyRangedSpeedOrder(
     .sort((a, b) => {
       const sa = getStats(a.unitType)?.speed ?? 0
       const sb = getStats(b.unitType)?.speed ?? 0
-      return sb - sa
+      return sa - sb
     })
 
   let remaining = totalDamage
@@ -223,6 +226,9 @@ function applyMeleeProportional(
 // Main Combat Resolution
 // -----------------------------------------------------------------------------
 
+/** Safety cap to prevent infinite loops (e.g. rounding prevents kills). */
+const MAX_ROUNDS = 50
+
 export function resolveCombat(
   attacker: ArmyForCombat,
   defender: ArmyForCombat
@@ -246,102 +252,125 @@ export function resolveCombat(
     }
   }
 
-  // ===================================================================
-  // PHASE 1 — RANGED VOLLEY (simultaneous)
-  // Both sides' archers fire at the same time. Defender guard towers
-  // add flat damage to the defending ranged volley.
-  // ===================================================================
-
-  // Pre-compute ranged damage from both sides using pre-casualty quantities
-  const atkArcherRaw = atkUnits
-    .filter((u) => RANGED_TYPES.has(u.unitType))
-    .reduce((sum, u) => {
-      const s = getStats(u.unitType)
-      return sum + (s?.attack ?? 0) * u.quantity
-    }, 0)
-
-  const defArcherRaw = defUnits
-    .filter((u) => RANGED_TYPES.has(u.unitType))
-    .reduce((sum, u) => {
-      const s = getStats(u.unitType)
-      return sum + (s?.attack ?? 0) * u.quantity
-    }, 0)
-
   const guardTowerDmg = GUARD_TOWER_DAMAGE_PER_LEVEL * guardTowerLevel
-  const totalDefRanged = defArcherRaw + guardTowerDmg
 
-  // Attacking archers → defender units (proportional, bypass walls)
-  if (atkArcherRaw > 0) {
-    applyRangedProportional(atkArcherRaw, defUnits)
+  // Wall HP is a depletable pool across rounds
+  let wallHpRemaining = WALL_HP_PER_LEVEL * wallLevel
+
+  // Mana defense multiplier (computed once, applies every melee round)
+  const manaMultiplier =
+    defender.isDefending && defender.manaReserve
+      ? getManaDefenseMultiplier(defender.manaReserve)
+      : 1
+
+  // Accumulators for phase-breakdown tracking
+  let totalRangedAtkLost = new Map<string, number>()
+  let totalRangedDefLost = new Map<string, number>()
+  let totalWallDamageAbsorbed = 0
+
+  // =================================================================
+  // COMBAT LOOP — Ranged volley + Melee each round, until one side
+  // is wiped out or MAX_ROUNDS is reached.
+  // =================================================================
+
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const atkAlive = atkUnits.some((u) => u.quantity > 0)
+    const defAlive = defUnits.some((u) => u.quantity > 0)
+    if (!atkAlive || !defAlive) break
+
+    const totalLostBefore = sumLost(atkUnits) + sumLost(defUnits)
+
+    // ---------------------------------------------------------------
+    // RANGED VOLLEY (simultaneous)
+    // Both sides' surviving archers fire. Guard tower fires every
+    // round. Ranged bypasses walls.
+    // ---------------------------------------------------------------
+
+    const lostBeforeRanged = snapshotLost(atkUnits, defUnits)
+
+    const atkArcherRaw = atkUnits
+      .filter((u) => RANGED_TYPES.has(u.unitType) && u.quantity > 0)
+      .reduce((sum, u) => {
+        const s = getStats(u.unitType)
+        return sum + (s?.attack ?? 0) * u.quantity
+      }, 0)
+
+    const defArcherRaw = defUnits
+      .filter((u) => RANGED_TYPES.has(u.unitType) && u.quantity > 0)
+      .reduce((sum, u) => {
+        const s = getStats(u.unitType)
+        return sum + (s?.attack ?? 0) * u.quantity
+      }, 0)
+
+    const totalDefRanged = defArcherRaw + guardTowerDmg
+
+    if (atkArcherRaw > 0) {
+      applyRangedProportional(atkArcherRaw, defUnits)
+    }
+    if (totalDefRanged > 0) {
+      applyRangedSpeedOrder(totalDefRanged, atkUnits)
+    }
+
+    // Accumulate ranged-phase losses
+    accumulateDelta(atkUnits, lostBeforeRanged.atk, totalRangedAtkLost)
+    accumulateDelta(defUnits, lostBeforeRanged.def, totalRangedDefLost)
+
+    // Check for wipe after ranged
+    if (!atkUnits.some((u) => u.quantity > 0) || !defUnits.some((u) => u.quantity > 0)) break
+
+    // ---------------------------------------------------------------
+    // MELEE (simultaneous)
+    // Surviving melee units fight. Archers do NOT deal melee damage
+    // but CAN be killed. Attacker melee hits remaining wall HP first,
+    // overflow damages defender units.
+    // ---------------------------------------------------------------
+
+    const atkMelee = atkUnits.filter(
+      (u) => MELEE_TYPES.has(u.unitType) && u.quantity > 0
+    )
+    const totalAtkMeleeRaw = atkMelee.reduce((sum, u) => {
+      const s = getStats(u.unitType)
+      let atk = (s?.attack ?? 0) * u.quantity
+      if (round === 0 && u.unitType === 'CAVALRY') atk *= CAVALRY_CHARGE_MULTIPLIER
+      return sum + atk
+    }, 0)
+
+    const defMelee = defUnits.filter(
+      (u) => MELEE_TYPES.has(u.unitType) && u.quantity > 0
+    )
+    let totalDefMeleeRaw = defMelee.reduce((sum, u) => {
+      const s = getStats(u.unitType)
+      return sum + (s?.attack ?? 0) * u.quantity
+    }, 0)
+
+    totalDefMeleeRaw *= manaMultiplier
+
+    // Snapshot melee compositions before casualties (simultaneous)
+    const atkMeleeSnap = atkMelee.map((u) => ({ ...u }))
+    const defMeleeSnap = defMelee.map((u) => ({ ...u }))
+
+    // Attacker melee → wall HP pool → overflow to units
+    const wallAbsorbed = Math.min(totalAtkMeleeRaw, wallHpRemaining)
+    wallHpRemaining -= wallAbsorbed
+    totalWallDamageAbsorbed += wallAbsorbed
+    const dmgAfterWall = totalAtkMeleeRaw - wallAbsorbed
+
+    if (dmgAfterWall > 0) {
+      applyMeleeProportional(dmgAfterWall, atkMeleeSnap, defUnits)
+    }
+
+    if (totalDefMeleeRaw > 0) {
+      applyMeleeProportional(totalDefMeleeRaw, defMeleeSnap, atkUnits)
+    }
+
+    // If no kills happened this entire round, break to avoid infinite loop
+    const totalLostAfter = sumLost(atkUnits) + sumLost(defUnits)
+    if (totalLostAfter === totalLostBefore) break
   }
 
-  // Defending archers + guard towers → attacker units (speed order, fastest die first)
-  if (totalDefRanged > 0) {
-    applyRangedSpeedOrder(totalDefRanged, atkUnits)
-  }
-
-  // Snapshot losses after ranged phase
-  const atkRangedLosses = atkUnits
-    .filter((u) => u.lost > 0)
-    .map((u) => ({ unitType: u.unitType, lost: u.lost }))
-  const defRangedLosses = defUnits
-    .filter((u) => u.lost > 0)
-    .map((u) => ({ unitType: u.unitType, lost: u.lost }))
-  const atkLostAfterRanged = new Map(atkUnits.map((u) => [u.unitType, u.lost]))
-  const defLostAfterRanged = new Map(defUnits.map((u) => [u.unitType, u.lost]))
-
-  // ===================================================================
-  // PHASE 2 — MELEE (simultaneous)
-  // Surviving melee units fight. Archers do NOT deal melee damage but
-  // CAN be killed. Attacker melee hits walls first, overflow to units.
-  // Mana reserve bonus applies to defender melee output.
-  // ===================================================================
-
-  // Compute melee damage from post-Phase-1 surviving melee units
-  const atkMelee = atkUnits.filter(
-    (u) => MELEE_TYPES.has(u.unitType) && u.quantity > 0
-  )
-  const totalAtkMeleeRaw = atkMelee.reduce((sum, u) => {
-    const s = getStats(u.unitType)
-    return sum + (s?.attack ?? 0) * u.quantity
-  }, 0)
-
-  const defMelee = defUnits.filter(
-    (u) => MELEE_TYPES.has(u.unitType) && u.quantity > 0
-  )
-  let totalDefMeleeRaw = defMelee.reduce((sum, u) => {
-    const s = getStats(u.unitType)
-    return sum + (s?.attack ?? 0) * u.quantity
-  }, 0)
-
-  // Mana reserve bonus: boost defender melee damage
-  if (defender.isDefending && defender.manaReserve) {
-    totalDefMeleeRaw *= getManaDefenseMultiplier(defender.manaReserve)
-  }
-
-  // Snapshot melee compositions before casualties for triangle weighting
-  // (melee is simultaneous — both sides use pre-melee-casualty compositions)
-  const atkMeleeSnap = atkMelee.map((u) => ({ ...u }))
-  const defMeleeSnap = defMelee.map((u) => ({ ...u }))
-
-  // Attacker melee → wall HP → overflow to defender units
-  const wallHp = WALL_HP_PER_LEVEL * wallLevel
-  const dmgAfterWall = Math.max(0, totalAtkMeleeRaw - wallHp)
-
-  if (dmgAfterWall > 0) {
-    applyMeleeProportional(dmgAfterWall, atkMeleeSnap, defUnits)
-  }
-
-  // Defender melee → attacker units (proportional)
-  if (totalDefMeleeRaw > 0) {
-    applyMeleeProportional(totalDefMeleeRaw, defMeleeSnap, atkUnits)
-  }
-
-  // ===================================================================
-  // PHASE 3 — DETERMINE WINNER & LOOT
-  // Attacker wins if all defender units are dead. If both sides have
-  // survivors, higher remaining attack power wins.
-  // ===================================================================
+  // =================================================================
+  // DETERMINE WINNER & LOOT
+  // =================================================================
 
   const anyDefSurvivors = defUnits.some((u) => u.quantity > 0)
   const anyAtkSurvivors = atkUnits.some((u) => u.quantity > 0)
@@ -352,7 +381,7 @@ export function resolveCombat(
   } else if (!anyAtkSurvivors) {
     attackerWins = false
   } else {
-    // Both sides have survivors — compare remaining combat power
+    // Both sides survived MAX_ROUNDS — compare remaining combat power
     const atkPower = atkUnits.reduce((sum, u) => {
       const s = getStats(u.unitType)
       return sum + (s?.attack ?? 0) * u.quantity
@@ -364,7 +393,7 @@ export function resolveCombat(
     attackerWins = atkPower > defPower
   }
 
-  // Loot calculation (unchanged — 20% of provisions, capped by caravan capacity)
+  // Loot calculation (20% of provisions, capped by caravan capacity)
   let loot = { ore: 0, provisions: 0, gold: 0 }
   if (attackerWins && hasCaravans(attacker.units)) {
     const lootPool = defender.provisions * 0.2
@@ -378,21 +407,23 @@ export function resolveCombat(
     }
   }
 
-  // Compute melee-phase loss deltas
+  // Build phase breakdown from accumulated totals
+  const atkRangedLosses = mapToLossArray(totalRangedAtkLost)
+  const defRangedLosses = mapToLossArray(totalRangedDefLost)
+
+  // Melee losses = total losses minus ranged losses
   const atkMeleeLosses = atkUnits
-    .filter((u) => u.lost - (atkLostAfterRanged.get(u.unitType) ?? 0) > 0)
+    .filter((u) => u.lost - (totalRangedAtkLost.get(u.unitType) ?? 0) > 0)
     .map((u) => ({
       unitType: u.unitType,
-      lost: u.lost - (atkLostAfterRanged.get(u.unitType) ?? 0),
+      lost: u.lost - (totalRangedAtkLost.get(u.unitType) ?? 0),
     }))
   const defMeleeLosses = defUnits
-    .filter((u) => u.lost - (defLostAfterRanged.get(u.unitType) ?? 0) > 0)
+    .filter((u) => u.lost - (totalRangedDefLost.get(u.unitType) ?? 0) > 0)
     .map((u) => ({
       unitType: u.unitType,
-      lost: u.lost - (defLostAfterRanged.get(u.unitType) ?? 0),
+      lost: u.lost - (totalRangedDefLost.get(u.unitType) ?? 0),
     }))
-
-  const wallDamageAbsorbed = Math.min(totalAtkMeleeRaw, wallHp)
 
   return {
     attackerWins,
@@ -412,8 +443,49 @@ export function resolveCombat(
       melee: {
         attackerCasualties: atkMeleeLosses,
         defenderCasualties: defMeleeLosses,
-        wallDamageAbsorbed,
+        wallDamageAbsorbed: totalWallDamageAbsorbed,
       },
     },
   }
+}
+
+// -----------------------------------------------------------------------------
+// Combat Loop Helpers
+// -----------------------------------------------------------------------------
+
+function sumLost(units: UnitTracker[]): number {
+  return units.reduce((sum, u) => sum + u.lost, 0)
+}
+
+function snapshotLost(
+  atkUnits: UnitTracker[],
+  defUnits: UnitTracker[]
+): { atk: Map<string, number>; def: Map<string, number> } {
+  return {
+    atk: new Map(atkUnits.map((u) => [u.unitType, u.lost])),
+    def: new Map(defUnits.map((u) => [u.unitType, u.lost])),
+  }
+}
+
+function accumulateDelta(
+  units: UnitTracker[],
+  before: Map<string, number>,
+  accumulator: Map<string, number>
+): void {
+  for (const u of units) {
+    const delta = u.lost - (before.get(u.unitType) ?? 0)
+    if (delta > 0) {
+      accumulator.set(u.unitType, (accumulator.get(u.unitType) ?? 0) + delta)
+    }
+  }
+}
+
+function mapToLossArray(
+  map: Map<string, number>
+): { unitType: string; lost: number }[] {
+  const result: { unitType: string; lost: number }[] = []
+  for (const [unitType, lost] of map) {
+    if (lost > 0) result.push({ unitType, lost })
+  }
+  return result
 }

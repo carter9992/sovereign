@@ -220,13 +220,13 @@ export const UNIT_TRAINING_COSTS = {
 // -----------------------------------------------------------------------------
 
 export const UNIT_STATS = {
-  INFANTRY: { attack: 10, defense: 8, speed: 0.5, carryCapacity: 0, provisionPerTile: 2 },
-  ARCHER: { attack: 12, defense: 5, speed: 0.5, carryCapacity: 0, provisionPerTile: 2 },
-  HEAVY_INFANTRY: { attack: 8, defense: 15, speed: 0.3, carryCapacity: 0, provisionPerTile: 3 },
+  INFANTRY: { attack: 9, defense: 7, speed: 0.5, carryCapacity: 0, provisionPerTile: 2 },
+  ARCHER: { attack: 5, defense: 5, speed: 0.5, carryCapacity: 0, provisionPerTile: 2 },
+  HEAVY_INFANTRY: { attack: 12, defense: 15, speed: 0.3, carryCapacity: 0, provisionPerTile: 3 },
   WARDEN: { attack: 3, defense: 25, speed: 0.1, carryCapacity: 0, provisionPerTile: 1 },
   CARAVAN: { attack: 0, defense: 2, speed: 0.4, carryCapacity: 200, provisionPerTile: 4 },
   SCOUT: { attack: 2, defense: 2, speed: 2.0, carryCapacity: 0, provisionPerTile: 1 },
-  CAVALRY: { attack: 15, defense: 10, speed: 1.0, carryCapacity: 0, provisionPerTile: 5 },
+  CAVALRY: { attack: 20, defense: 10, speed: 1.0, carryCapacity: 0, provisionPerTile: 5 },
 } as const;
 
 // -----------------------------------------------------------------------------
@@ -242,6 +242,7 @@ export const PROTECTION_DURATION_MS = 24 * 60 * 60 * 1000;
 
 export const WALL_HP_PER_LEVEL = 100
 export const GUARD_TOWER_DAMAGE_PER_LEVEL = 20
+export const CAVALRY_CHARGE_MULTIPLIER = 2.0
 
 // -----------------------------------------------------------------------------
 // 14. Combat Triangle
